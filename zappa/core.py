@@ -283,7 +283,8 @@ class Zappa:
         tags=(),
         endpoint_urls={},
         xray_tracing=False,
-        keep_policies=None
+        keep_policies=None,
+        allow_all_events=False
     ):
         """
         Instantiate this new Zappa instance, loading any custom credentials if necessary.
@@ -317,6 +318,7 @@ class Zappa:
         self.endpoint_urls = endpoint_urls
         self.xray_tracing = xray_tracing
         self.keep_policies = keep_policies
+        self.allow_all_events = allow_all_events
 
         # Some common invocations, such as DB migrations,
         # can take longer than the default.
@@ -2710,7 +2712,11 @@ class Zappa:
                 for s in statement:
                     sid = s['Sid']
                     if self.keep_policies:
-                        if self.keep_policies == '*' or (isinstance(self.keep_policies, list) and sid in self.keep_policies) or (isinstance(self.keep_policies, str) and self.keep_policies in sid):
+                        if (
+                            self.keep_policies == '*' or
+                            (isinstance(self.keep_policies, list) and sid in self.keep_policies) or
+                            (isinstance(self.keep_policies, str) and self.keep_policies in sid)
+                        ):
                             # * = keep all
                             # string = keep sids that contain the value
                             # list = keep sids that are in the list (no wildcards)
@@ -2736,16 +2742,24 @@ class Zappa:
         Create permissions to link to an event.
         Related: http://docs.aws.amazon.com/lambda/latest/dg/with-s3-example-configure-event-source.html
         """
+        if principal == 'events.amazonaws.com' and self.allow_all_events:
+            # do not create individual entries, instead use one wildcard rule to cover all of them
+            # this is helpful in case you have many event triggers, which can exceed the resource policy limit
+            statement_id = "allow-all-events"
+            source_arn = source_arn.split('/')[0] + '/*'
+        else:
+            statement_id = "".join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8)),
+
         logger.debug("Adding new permission to invoke Lambda function: {}".format(lambda_name))
 
         account_id: str = self.sts_client.get_caller_identity().get("Account")
 
         permission_response = self.lambda_client.add_permission(
             FunctionName=lambda_name,
-            StatementId="".join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8)),
             Action="lambda:InvokeFunction",
             Principal=principal,
             SourceArn=source_arn,
+            StatementId=statement_id,
             # The SourceAccount argument ensures that only the specified AWS account can invoke the lambda function.
             # This prevents a security issue where if a lambda is triggered off of s3 bucket events and the bucket is
             # deleted, another AWS account can create a bucket with the same name and potentially trigger the original
@@ -2755,7 +2769,8 @@ class Zappa:
         )
 
         if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
-            print("Problem creating permission to invoke Lambda function")
+            if not self.allow_all_events:
+                print("Problem creating permission to invoke Lambda function")
             return None  # XXX: Raise?
 
         return permission_response
@@ -2785,6 +2800,7 @@ class Zappa:
             events=events,
             excluded_source_services=pull_services,
         )
+
         for event in events:
             function = event["function"]
             expression = event.get("expression", None)  # single expression
