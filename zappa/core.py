@@ -2769,10 +2769,12 @@ class Zappa:
                 SourceAccount=account_id,
             )
         except Exception as e:
+            print(str(e))
             if self.allow_all_events and 'already exists' in str(e):
                 # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
                 return None
-            raise
+            else:
+                raise
         else:
             if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
                 print("Problem creating permission to invoke Lambda function")
