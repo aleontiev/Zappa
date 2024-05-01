@@ -2768,17 +2768,17 @@ class Zappa:
                 # https://github.com/zappa/Zappa/issues/1039
                 SourceAccount=account_id,
             )
-        except botocore.exceptions.ClientError as e:
-            if 'already exists' in str(e) and self.allow_all_events:
+        except botocore.errorfactory.ResourceConflictException as e:
+            if self.allow_all_events:
                 # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
                 return None
             raise
+        else:
+            if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
+                print("Problem creating permission to invoke Lambda function")
+                return None  # XXX: Raise?
 
-        if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
-            print("Problem creating permission to invoke Lambda function")
-            return None  # XXX: Raise?
-
-        return permission_response
+            return permission_response
 
     def schedule_events(self, lambda_arn, lambda_name, events, default=True):
         """
