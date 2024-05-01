@@ -2768,8 +2768,8 @@ class Zappa:
                 # https://github.com/zappa/Zappa/issues/1039
                 SourceAccount=account_id,
             )
-        except botocore.errorfactory.ResourceConflictException as e:
-            if self.allow_all_events:
+        except Exception as e:
+            if self.allow_all_events and 'already exists' in str(e):
                 # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
                 return None
             raise
