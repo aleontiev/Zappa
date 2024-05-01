@@ -319,6 +319,7 @@ class Zappa:
         self.xray_tracing = xray_tracing
         self.keep_policies = keep_policies
         self.allow_all_events = allow_all_events
+        self.all_events_rule_added = False
 
         # Some common invocations, such as DB migrations,
         # can take longer than the default.
@@ -2743,8 +2744,12 @@ class Zappa:
         Related: http://docs.aws.amazon.com/lambda/latest/dg/with-s3-example-configure-event-source.html
         """
         if principal == 'events.amazonaws.com' and self.allow_all_events:
+            if self.all_events_rule_added:
+                return None
             # do not create individual entries, instead use one wildcard rule to cover all of them
             # this is helpful in case you have many event triggers, which can exceed the resource policy limit
+            # only do this once
+            self.all_events_rule_added = True
             statement_id = "allow-all-events"
             source_arn = source_arn.split('/')[0] + '/*'
         else:
@@ -2754,33 +2759,26 @@ class Zappa:
 
         account_id: str = self.sts_client.get_caller_identity().get("Account")
 
-        try:
-            permission_response = self.lambda_client.add_permission(
-                FunctionName=lambda_name,
-                Action="lambda:InvokeFunction",
-                Principal=principal,
-                SourceArn=source_arn,
-                StatementId=statement_id,
-                # The SourceAccount argument ensures that only the specified AWS account can invoke the lambda function.
-                # This prevents a security issue where if a lambda is triggered off of s3 bucket events and the bucket is
-                # deleted, another AWS account can create a bucket with the same name and potentially trigger the original
-                # lambda function, since bucket names are global.
-                # https://github.com/zappa/Zappa/issues/1039
-                SourceAccount=account_id,
-            )
-        except Exception as e:
-            logger.error("Unexpected error {}".format(e.args[0] if hasattr(e, 'args') else str(e)))
-            if self.allow_all_events:
-                # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
-                return None
-            else:
-                raise
-        else:
-            if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
-                print("Problem creating permission to invoke Lambda function")
-                return None  # XXX: Raise?
+        permission_response = self.lambda_client.add_permission(
+            FunctionName=lambda_name,
+            Action="lambda:InvokeFunction",
+            Principal=principal,
+            SourceArn=source_arn,
+            StatementId=statement_id,
+            # The SourceAccount argument ensures that only the specified AWS account can invoke the lambda function.
+            # This prevents a security issue where if a lambda is triggered off of s3 bucket events and the bucket is
+            # deleted, another AWS account can create a bucket with the same name and potentially trigger the original
+            # lambda function, since bucket names are global.
+            # https://github.com/zappa/Zappa/issues/1039
+            SourceAccount=account_id,
+        )
 
-            return permission_response
+
+        if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
+            print("Problem creating permission to invoke Lambda function")
+            return None  # XXX: Raise?
+
+        return permission_response
 
     def schedule_events(self, lambda_arn, lambda_name, events, default=True):
         """
