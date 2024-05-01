@@ -2769,8 +2769,8 @@ class Zappa:
                 SourceAccount=account_id,
             )
         except Exception as e:
-            print(str(e))
-            if self.allow_all_events and 'already exists' in str(e):
+            logger.error("Unexpected error {}".format(e.args[0] if hasattr(e, 'args') else str(e)))
+            if self.allow_all_events:
                 # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
                 return None
             else:
