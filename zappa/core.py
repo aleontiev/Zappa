@@ -2754,23 +2754,28 @@ class Zappa:
 
         account_id: str = self.sts_client.get_caller_identity().get("Account")
 
-        permission_response = self.lambda_client.add_permission(
-            FunctionName=lambda_name,
-            Action="lambda:InvokeFunction",
-            Principal=principal,
-            SourceArn=source_arn,
-            StatementId=statement_id,
-            # The SourceAccount argument ensures that only the specified AWS account can invoke the lambda function.
-            # This prevents a security issue where if a lambda is triggered off of s3 bucket events and the bucket is
-            # deleted, another AWS account can create a bucket with the same name and potentially trigger the original
-            # lambda function, since bucket names are global.
-            # https://github.com/zappa/Zappa/issues/1039
-            SourceAccount=account_id,
-        )
+        try:
+            permission_response = self.lambda_client.add_permission(
+                FunctionName=lambda_name,
+                Action="lambda:InvokeFunction",
+                Principal=principal,
+                SourceArn=source_arn,
+                StatementId=statement_id,
+                # The SourceAccount argument ensures that only the specified AWS account can invoke the lambda function.
+                # This prevents a security issue where if a lambda is triggered off of s3 bucket events and the bucket is
+                # deleted, another AWS account can create a bucket with the same name and potentially trigger the original
+                # lambda function, since bucket names are global.
+                # https://github.com/zappa/Zappa/issues/1039
+                SourceAccount=account_id,
+            )
+        except botocore.exceptions.ClientError as e:
+            if 'already exists' in str(e) and self.allow_all_events:
+                # expected uniqueness constraint error on adding 2nd instance of the wildcard rule
+                return None
+            raise
 
         if permission_response["ResponseMetadata"]["HTTPStatusCode"] != 201:
-            if not self.allow_all_events:
-                print("Problem creating permission to invoke Lambda function")
+            print("Problem creating permission to invoke Lambda function")
             return None  # XXX: Raise?
 
         return permission_response
